@@ -20,9 +20,9 @@ CLASSIFIER_PATH = os.path.normpath(
 @pytest.fixture
 def mock_classifier():
     clf = MagicMock()
-    clf.predict.return_value = ["Cultural"]
-    clf.predict_proba.return_value = [[0.05, 0.1, 0.05, 0.7, 0.05, 0.05]]
-    clf.classes_ = ["Adventure", "Beach", "Budget", "Cultural", "Luxury", "Relaxation"]
+    clf.predict.return_value = ["Culture"]
+    clf.predict_proba.return_value = [[0.05, 0.05, 0.7, 0.05, 0.1, 0.05]]
+    clf.classes_ = ["Adventure", "Budget", "Culture", "Family", "Luxury", "Relaxation"]
     return clf
 
 
