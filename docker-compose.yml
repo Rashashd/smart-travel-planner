@@ -21,7 +21,7 @@ services:
       - "8000:8000"
     env_file: ./backend/.env
     environment:
-      # Override the local DB URL — inside Docker, backend reaches db container
+      # Override the local DB URL; inside Docker, backend reaches db container
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/travel
       CLASSIFIER_PATH: /app/ml/classifier.joblib
     depends_on:

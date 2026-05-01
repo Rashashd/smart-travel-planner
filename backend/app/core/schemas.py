@@ -3,7 +3,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# Authentication
 
 class UserCreate(BaseModel):
     # username field in OAuth2 form maps to email
@@ -27,5 +27,18 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    # Extracted from JWT — only the user_id is stored in the token
+    # Extracted from JWT; only the user_id is stored in the token
     user_id: uuid.UUID
+
+
+# Chat
+
+class ChatRequest(BaseModel):
+    question: str
+    session_id: str | None = None  # UUID string — None means start a new session
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    session_id: str
+    tool_calls: list[dict]

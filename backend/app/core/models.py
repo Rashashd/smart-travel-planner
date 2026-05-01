@@ -12,6 +12,7 @@ def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
+# mapped_column: define this database column, with these constraints, and link it to the Python type declared on the left
 class User(Base):
     __tablename__ = "users"
 
