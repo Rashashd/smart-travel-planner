@@ -46,12 +46,8 @@ async def me(current_user: CurrentUserDep):
 
 @router.delete("/me", status_code=204)
 async def delete_account(current_user: CurrentUserDep, db: DBDep):
-    result = await db.execute(select(User).where(User.id == current_user.id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    # Anonymize instead of delete — frees the email for re-registration, data stays for analytics
-    user.email = f"deleted_{user.id}@deleted"
-    user.hashed_password = ""
-    user.is_active = False
+    # Anonymize instead of delete — frees the email for re-registration
+    current_user.email = f"deleted_{current_user.id}@deleted"
+    current_user.hashed_password = ""
+    current_user.is_active = False
     await db.commit()

@@ -5,6 +5,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, HTTPException
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -17,6 +18,29 @@ from app.services.webhook import TripPlanEvent, deliver_trip_plan
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+class ToolTimingCallback(BaseCallbackHandler):
+    """Records how long each tool call takes and whether it errored."""
+
+    def __init__(self):
+        self._starts: dict[str, float] = {}  # run_id -> start time
+        self.durations: list[float | None] = []  # one entry per tool call, in order
+        self.errors: list[str | None] = []       # matching error messages (or None)
+
+    def on_tool_start(self, serialized, input_str, *, run_id, **kwargs):
+        self._starts[str(run_id)] = time.perf_counter()
+        self.errors.append(None)
+
+    def on_tool_end(self, output, *, run_id, **kwargs):
+        start = self._starts.pop(str(run_id), None)
+        self.durations.append(round(time.perf_counter() - start, 3) if start else None)
+
+    def on_tool_error(self, error, *, run_id, **kwargs):
+        start = self._starts.pop(str(run_id), None)
+        self.durations.append(round(time.perf_counter() - start, 3) if start else None)
+        if self.errors:
+            self.errors[-1] = str(error)
 
 
 class ChatRequest(BaseModel):
@@ -59,11 +83,12 @@ async def chat(
     # has no state for this thread. Inject DB history so the agent has context.
     messages_to_send = await _build_messages(agent, config, session.id, req.question, db)
 
+    timing_cb = ToolTimingCallback()
     start = time.perf_counter()
 
     result = await agent.ainvoke(
         {"messages": messages_to_send},
-        config=config,
+        config={**config, "callbacks": [timing_cb]},
     )
 
     duration = time.perf_counter() - start
@@ -84,12 +109,14 @@ async def chat(
     db.add(agent_run)
     await db.flush()
 
-    for tc in tool_calls_data:
+    for i, tc in enumerate(tool_calls_data):
         db.add(ToolCall(
             agent_run_id=agent_run.id,
             tool_name=tc["tool_name"],
             input_json=tc["input_json"],
             output_json=tc["output_json"],
+            error=timing_cb.errors[i] if i < len(timing_cb.errors) else None,
+            duration_s=timing_cb.durations[i] if i < len(timing_cb.durations) else None,
         ))
 
     await db.commit()
@@ -214,6 +241,7 @@ def _extract_tool_calls(messages: list) -> list[dict]:
                     "tool_name": tc["name"],
                     "input_json": json.dumps(tc["args"]),
                     "output_json": None,
+                    "error": None,
                 }
                 by_id[tc["id"]] = entry
                 ordered.append(entry)
@@ -222,6 +250,14 @@ def _extract_tool_calls(messages: list) -> list[dict]:
         if msg.__class__.__name__ == "ToolMessage":
             entry = by_id.get(getattr(msg, "tool_call_id", None))
             if entry:
-                entry["output_json"] = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+                output = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+                entry["output_json"] = output
+                # If the tool returned a ToolError, surface it in the error field
+                try:
+                    parsed = json.loads(output)
+                    if "error" in parsed and "retryable" in parsed:
+                        entry["error"] = parsed["error"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
     return ordered

@@ -16,10 +16,6 @@ class RAGInput(BaseModel):
     query: str = Field(..., min_length=3)
 
 
-class _RewrittenQuery(BaseModel):
-    query: str
-
-
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -27,11 +23,8 @@ class _RewrittenQuery(BaseModel):
     reraise=True,
 )
 async def _rewrite_query(raw: str, cheap_llm: ChatOpenAI) -> str:
-    structured = cheap_llm.with_structured_output(_RewrittenQuery)
-    result = await structured.ainvoke(
-        RAG_QUERY_REWRITE_PROMPT.format(query=raw)
-    )
-    return result.query
+    result = await cheap_llm.ainvoke(RAG_QUERY_REWRITE_PROMPT.format(query=raw))
+    return result.content.strip()
 
 
 def make_rag_tool(cheap_llm: ChatOpenAI, retriever: Callable) -> StructuredTool:

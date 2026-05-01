@@ -43,10 +43,6 @@ async def lifespan(app: FastAPI):
     logger.info("shutdown complete")
 
 
-async def _load_classifier(path: str) -> object:
-    return await asyncio.to_thread(joblib.load, path)
-
-
 app = FastAPI(title="Smart Travel Planner", lifespan=lifespan)
 
 app.add_middleware(

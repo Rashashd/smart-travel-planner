@@ -22,12 +22,6 @@ class LiveConditionsInput(BaseModel):
     country: str = Field(..., min_length=1)
 
 
-def _make_caches(ttl: int) -> tuple[TTLCache, TTLCache]:
-    # weather keyed by city name, FX keyed by base currency
-    return TTLCache(maxsize=256, ttl=ttl), TTLCache(maxsize=32, ttl=ttl)
-
-
-# Initialise caches once at import time using the configured TTL
 _s = get_settings()
 _weather_cache: TTLCache = TTLCache(maxsize=256, ttl=_s.weather_cache_ttl)
 _fx_cache: TTLCache = TTLCache(maxsize=32, ttl=_s.weather_cache_ttl)
