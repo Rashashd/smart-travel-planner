@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -18,6 +19,43 @@ from app.services.webhook import TripPlanEvent, deliver_trip_plan
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+
+# Pricing per 1M tokens (as of 2024)
+_PRICING: dict[str, dict[str, float]] = {
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+}
+
+
+class CostTracker(BaseCallbackHandler):
+    """Accumulates token counts across all LLM calls in one agent run and computes cost."""
+
+    def __init__(self):
+        self._cost_usd: float = 0.0
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        for generation in response.generations:
+            for g in generation:
+                usage = getattr(g.message, "usage_metadata", None) or getattr(g, "generation_info", {})
+                if not usage:
+                    continue
+                prompt = usage.get("input_tokens") or usage.get("prompt_tokens", 0)
+                completion = usage.get("output_tokens") or usage.get("completion_tokens", 0)
+                self.prompt_tokens += prompt
+                self.completion_tokens += completion
+                model = getattr(g.message, "response_metadata", {}).get("model_name", "")
+                for key, prices in _PRICING.items():
+                    if key in model:
+                        self._cost_usd += (
+                            prompt * prices["input"] + completion * prices["output"]
+                        ) / 1_000_000
+                        break
+
+    @property
+    def cost_usd(self) -> float:
+        return round(self._cost_usd, 6)
 
 
 class ToolTimingCallback(BaseCallbackHandler):
@@ -84,11 +122,12 @@ async def chat(
     messages_to_send = await _build_messages(agent, config, session.id, req.question, db)
 
     timing_cb = ToolTimingCallback()
+    cost_cb = CostTracker()
     start = time.perf_counter()
 
     result = await agent.ainvoke(
         {"messages": messages_to_send},
-        config={**config, "callbacks": [timing_cb]},
+        config={**config, "callbacks": [timing_cb, cost_cb]},
     )
 
     duration = time.perf_counter() - start
@@ -105,6 +144,9 @@ async def chat(
         input=req.question,
         output=answer,
         duration_s=round(duration, 3),
+        cost_usd=cost_cb.cost_usd,
+        prompt_tokens=cost_cb.prompt_tokens,
+        completion_tokens=cost_cb.completion_tokens,
     )
     db.add(agent_run)
     await db.flush()
@@ -125,7 +167,7 @@ async def chat(
     s = get_settings()
     asyncio.create_task(deliver_trip_plan(s.slack_webhook_url, TripPlanEvent(user_email=user.email, plan=answer)))
 
-    log.info("chat.complete", session_id=str(session.id), duration_s=duration)
+    log.info("chat.complete", session_id=str(session.id), duration_s=duration, cost_usd=cost_cb.cost_usd)
 
     return ChatResponse(
         answer=answer,
