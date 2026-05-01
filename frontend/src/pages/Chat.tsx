@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useAuth } from '../AuthContext'
 import { api } from '../api'
@@ -7,11 +7,56 @@ interface ToolCall { tool_name: string; input_json: string; output_json: string 
 interface Message { role: 'user' | 'assistant'; content: string; tool_calls?: ToolCall[] }
 interface Session { id: string; title: string; created_at: string }
 
-const TOOL_ICONS: Record<string, string> = {
-  get_live_conditions: '🌤️',
-  search_destination_knowledge: '📚',
-  classify_trip: '🏷️',
-  duckduckgo_search: '🔍',
+const TOOL_META: Record<string, { icon: string; label: string }> = {
+  get_live_conditions:          { icon: '🌤️', label: 'Live Conditions' },
+  search_destination_knowledge: { icon: '📚', label: 'Destination Knowledge' },
+  classify_destination:         { icon: '🏷️', label: 'Travel Style' },
+  web_search:                   { icon: '🔍', label: 'Web Search' },
+}
+
+function summarizeInput(toolName: string, inputJson: string): string {
+  try {
+    const d = JSON.parse(inputJson)
+    switch (toolName) {
+      case 'get_live_conditions':          return `${d.city}, ${d.country}`
+      case 'search_destination_knowledge': return d.query ?? ''
+      case 'classify_destination':         return `${d.avg_temp_c}°C · beach ${d.beach_score}/10 · culture ${d.cultural_sites_score}/10`
+      case 'web_search':                   return d.query ?? ''
+      default: return ''
+    }
+  } catch { return '' }
+}
+
+function summarizeOutput(toolName: string, outputJson: string | null): string {
+  if (!outputJson) return '—'
+  try {
+    const d = JSON.parse(outputJson)
+    if (d?.error) return `Error: ${d.error}`
+    switch (toolName) {
+      case 'classify_destination': {
+        const style = d.predicted_style ?? '?'
+        const prob  = d.probabilities?.[style]
+        return prob != null ? `${style} · ${Math.round(prob * 100)}% confidence` : style
+      }
+      case 'get_live_conditions': {
+        const parts: string[] = []
+        if (d.weather?.temp_c   != null) parts.push(`${d.weather.temp_c}°C`)
+        if (d.weather?.precipitation_mm != null) parts.push(`${d.weather.precipitation_mm}mm rain`)
+        if (d.flights?.cheapest_round_trip_usd) parts.push(`flights ~$${d.flights.cheapest_round_trip_usd}`)
+        return parts.join(' · ') || 'Retrieved'
+      }
+      case 'search_destination_knowledge': {
+        if (!Array.isArray(d)) return 'Retrieved'
+        const dest = d[0]?.destination ?? ''
+        const sim  = d[0]?.similarity  != null ? ` · ${Math.round(d[0].similarity * 100)}% match` : ''
+        return `${d.length} chunk${d.length !== 1 ? 's' : ''}${dest ? ` on ${dest}` : ''}${sim}`
+      }
+      case 'web_search':
+        return Array.isArray(d) ? `${d.length} result${d.length !== 1 ? 's' : ''}` : 'Retrieved'
+      default:
+        return 'Done'
+    }
+  } catch { return 'Done' }
 }
 
 function ToolCallPanel({ calls }: { calls: ToolCall[] }) {
@@ -28,46 +73,36 @@ function ToolCallPanel({ calls }: { calls: ToolCall[] }) {
         <span>{calls.length} tool{calls.length > 1 ? 's' : ''} used</span>
         <span className="flex gap-1 ml-1">
           {calls.map((tc, i) => (
-            <span key={i} title={tc.tool_name}>{TOOL_ICONS[tc.tool_name] ?? '🔧'}</span>
+            <span key={i} title={(TOOL_META[tc.tool_name] ?? {}).label ?? tc.tool_name}>
+              {(TOOL_META[tc.tool_name] ?? {}).icon ?? '🔧'}
+            </span>
           ))}
         </span>
       </button>
 
       {open && (
-        <div className="mt-2 space-y-2">
-          {calls.map((tc, i) => (
-            <div key={i} className="rounded-xl border border-sky-200 bg-white overflow-hidden">
-              {/* Tool header */}
-              <div className="flex items-center gap-2 px-3 py-2 bg-sky-50 border-b border-sky-100">
-                <span>{TOOL_ICONS[tc.tool_name] ?? '🔧'}</span>
-                <span className="font-semibold text-sky-800">{tc.tool_name}</span>
+        <div className="mt-2 space-y-1.5">
+          {calls.map((tc, i) => {
+            const meta = TOOL_META[tc.tool_name] ?? { icon: '🔧', label: tc.tool_name }
+            const inputSummary  = summarizeInput(tc.tool_name, tc.input_json)
+            const outputSummary = summarizeOutput(tc.tool_name, tc.output_json)
+            return (
+              <div key={i} className="flex items-start gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2">
+                <span className="text-base leading-none mt-0.5">{meta.icon}</span>
+                <div className="min-w-0">
+                  <span className="font-semibold text-sky-800">{meta.label}</span>
+                  {inputSummary && (
+                    <span className="text-gray-400 ml-1.5">· {inputSummary}</span>
+                  )}
+                  <p className="text-gray-600 mt-0.5 truncate">{outputSummary}</p>
+                </div>
               </div>
-              {/* Input */}
-              <div className="px-3 py-2 border-b border-sky-50">
-                <p className="text-gray-400 uppercase tracking-wider text-[10px] mb-1">Input</p>
-                <pre className="text-gray-700 whitespace-pre-wrap break-all font-mono text-[11px]">
-                  {formatJson(tc.input_json)}
-                </pre>
-              </div>
-              {/* Output */}
-              <div className="px-3 py-2">
-                <p className="text-gray-400 uppercase tracking-wider text-[10px] mb-1">Output</p>
-                <pre className="text-gray-700 whitespace-pre-wrap break-all font-mono text-[11px] max-h-40 overflow-y-auto">
-                  {tc.output_json ? formatJson(tc.output_json) : '—'}
-                </pre>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
   )
-}
-
-function formatJson(raw: string | null): string {
-  if (!raw) return '—'
-  try { return JSON.stringify(JSON.parse(raw), null, 2) }
-  catch { return raw }
 }
 
 export default function Chat() {
@@ -113,7 +148,7 @@ export default function Chat() {
     logout()
   }
 
-  const send = async (e: FormEvent) => {
+  const send = async (e: { preventDefault(): void }) => {
     e.preventDefault()
     if (!input.trim() || loading) return
     const question = input.trim()
