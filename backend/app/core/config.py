@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Required — app crashes on startup if missing
     database_url: str
-    openai_api_key: str = Field(..., min_length=1)
+    openai_api_key: SecretStr = Field(...)
     jwt_secret: str
     slack_webhook_url: str
 

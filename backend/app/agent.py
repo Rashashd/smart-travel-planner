@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from typing import Any
 
 import structlog
 from langchain_core.messages import AIMessage, HumanMessage
@@ -8,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 from sqlalchemy import select
 
-from app.core.callbacks import CostTracker, ToolTimingCallback, _TokenLogger
+from app.core.callbacks import _TokenLogger
 from app.core.config import Settings
 from app.core.models import ChatMessage
 from app.prompts import TRAVEL_AGENT_SYSTEM_PROMPT
@@ -19,10 +20,8 @@ from app.tools.search_tool import make_search_tool
 
 log = structlog.get_logger(__name__)
 
-__all__ = ["CostTracker", "ToolTimingCallback", "build_messages", "extract_tool_calls", "build_agent"]
 
-
-async def build_messages(agent: object, config: dict, session_id: object, question: str, db: object) -> list:
+async def build_messages(agent: Any, config: dict, session_id: Any, question: str, db: Any) -> list:
     """Return messages to send to the agent.
 
     Warm (checkpointer has state): send only the new message.
@@ -67,7 +66,7 @@ def extract_tool_calls(messages: list) -> list[dict]:
                 ordered.append(entry)
 
         if msg.__class__.__name__ == "ToolMessage":
-            entry = by_id.get(getattr(msg, "tool_call_id", None))
+            entry = by_id.get(getattr(msg, "tool_call_id", ""))
             if entry:
                 output = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
                 entry["output_json"] = output
