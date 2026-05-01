@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import pandas as pd
 import structlog
@@ -21,7 +22,7 @@ class ClassifyInput(BaseModel):
     family_friendly_score: int = Field(..., ge=0, le=10)
 
 
-def make_classifier_tool(classifier) -> StructuredTool:
+def make_classifier_tool(classifier: Any) -> StructuredTool:
     async def _classify(
         avg_temp_c: float,
         beach_score: int,
@@ -60,6 +61,14 @@ def make_classifier_tool(classifier) -> StructuredTool:
     return StructuredTool.from_function(
         coroutine=_classify,
         name="classify_destination",
-        description="Classify a destination by travel style given numeric feature scores.",
+        description=(
+            "Classify a destination's travel style (Adventure/Budget/Culture/Family/Luxury/Relaxation). "
+            "Estimate the numeric scores from your knowledge of the destination: "
+            "avg_temp_c (annual average °C), beach_score (0=none to 10=world-class), "
+            "mountain_score (0=flat to 10=major mountain destination), "
+            "cultural_sites_score (0=few to 10=UNESCO-rich), nightlife_score (0=quiet to 10=world-class), "
+            "avg_daily_cost_usd (typical tourist daily spend in USD), "
+            "luxury_index (0=budget to 10=ultra-luxury), family_friendly_score (0=adult-only to 10=ideal for families)."
+        ),
         args_schema=ClassifyInput,
     )

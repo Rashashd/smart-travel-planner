@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     async with app.state.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    app.state.openai = AsyncOpenAI(api_key=s.openai_api_key)
+    app.state.openai = AsyncOpenAI(api_key=s.openai_api_key.get_secret_value())
     app.state.classifier = await asyncio.to_thread(joblib.load, s.classifier_path)
 
     retriever = make_retriever(app.state.engine, app.state.openai)
