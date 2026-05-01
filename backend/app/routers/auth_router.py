@@ -38,6 +38,7 @@ async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DBDep
     return Token(access_token=create_access_token(user.id))
 
 
+# it lets the frontend check if a stored JWT token is still valid and get the logged-in user's info; token decoding, db lookup, and validation are done in currentuserdep
 @router.get("/me", response_model=UserOut)
 async def me(current_user: CurrentUserDep):
     # get_current_user in deps.py already validates the token and fetches the user

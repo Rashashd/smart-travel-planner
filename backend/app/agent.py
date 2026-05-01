@@ -1,13 +1,16 @@
+import json
 from collections.abc import Callable
-from typing import Any
 
 import structlog
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
+from sqlalchemy import select
 
+from app.core.callbacks import CostTracker, ToolTimingCallback, _TokenLogger
 from app.core.config import Settings
+from app.core.models import ChatMessage
 from app.prompts import TRAVEL_AGENT_SYSTEM_PROMPT
 from app.tools.classifier_tool import make_classifier_tool
 from app.tools.live_tool import make_live_tool
@@ -16,32 +19,71 @@ from app.tools.search_tool import make_search_tool
 
 log = structlog.get_logger(__name__)
 
+__all__ = ["CostTracker", "ToolTimingCallback", "build_messages", "extract_tool_calls", "build_agent"]
 
-class _TokenLogger(BaseCallbackHandler):
-    """Logs prompt + completion token counts after every LLM call."""
 
-    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-        for generation in response.generations:
-            for g in generation:
-                usage = getattr(g.message, "usage_metadata", None) or getattr(g, "generation_info", {})
-                if not usage:
-                    continue
-                prompt_tokens = usage.get("input_tokens") or usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("output_tokens") or usage.get("completion_tokens", 0)
-                model = getattr(g.message, "response_metadata", {}).get("model_name", "unknown")
-                log.info(
-                    "llm.tokens",
-                    model=model,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens,
-                )
+async def build_messages(agent: object, config: dict, session_id: object, question: str, db: object) -> list:
+    """Return messages to send to the agent.
+
+    Warm (checkpointer has state): send only the new message.
+    Cold (server restarted): replay DB history first, then append the new message.
+    """
+    checkpoint = await agent.checkpointer.aget(config)
+    if checkpoint is not None:
+        return [HumanMessage(content=question)]
+
+    hist_result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at)
+    )
+    history = hist_result.scalars().all()
+
+    messages: list = []
+    for msg in history:
+        if msg.role == "user":
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == "assistant":
+            messages.append(AIMessage(content=msg.content))
+    messages.append(HumanMessage(content=question))
+    return messages
+
+
+def extract_tool_calls(messages: list) -> list[dict]:
+    """Parse LangGraph message list into a flat list of tool call dicts."""
+    by_id: dict[str, dict] = {}
+    ordered: list[dict] = []
+
+    for msg in messages:
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tc in msg.tool_calls:
+                entry = {
+                    "tool_name": tc["name"],
+                    "input_json": json.dumps(tc["args"]),
+                    "output_json": None,
+                    "error": None,
+                }
+                by_id[tc["id"]] = entry
+                ordered.append(entry)
+
+        if msg.__class__.__name__ == "ToolMessage":
+            entry = by_id.get(getattr(msg, "tool_call_id", None))
+            if entry:
+                output = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+                entry["output_json"] = output
+                try:
+                    parsed = json.loads(output)
+                    if "error" in parsed and "retryable" in parsed:
+                        entry["error"] = parsed["error"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+    return ordered
 
 
 def build_agent(settings: Settings, classifier: object, retriever: Callable) -> object:
     token_logger = _TokenLogger()
 
-    # cheap model for query rewriting inside rag_tool — fast and cheap
     cheap_llm = ChatOpenAI(
         model=settings.cheap_model,
         temperature=0,
@@ -49,7 +91,6 @@ def build_agent(settings: Settings, classifier: object, retriever: Callable) -> 
         callbacks=[token_logger],
     )
 
-    # strong model for the agent itself — better reasoning for trip planning
     strong_llm = ChatOpenAI(
         model=settings.strong_model,
         temperature=0.2,
