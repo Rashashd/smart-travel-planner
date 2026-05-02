@@ -26,7 +26,7 @@ services:
       CLASSIFIER_PATH: /app/ml/classifier.joblib
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy # ensures Postgres is actually ready before FastAPI starts
 
   frontend:
     build: ./frontend

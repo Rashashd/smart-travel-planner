@@ -9,7 +9,7 @@ from app.core.db import make_session_factory
 
 log = structlog.get_logger(__name__)
 
-
+# this file is responsible for retrieving relevant documents from the database given a query, used by rag_tool in agent.py
 async def _embed_query(client: AsyncOpenAI, query: str) -> list[float]:
     # Use the same model as ingest.py — dimension mismatch otherwise
     response = await client.embeddings.create(

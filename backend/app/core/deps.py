@@ -14,7 +14,7 @@ from app.core.db import make_session_factory
 from app.core.models import User
 from app.services.auth import decode_token
 
-
+# opens new AsyncSession, closes on response done
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     # Opens a session for the request and closes it when the response is sent
     factory = make_session_factory(request.app.state.engine)
@@ -29,15 +29,15 @@ def get_openai(request: Request) -> AsyncOpenAI:
 def get_classifier(request: Request) -> object:
     return request.app.state.classifier
 
-
+# returns agent from app state, which is initialized at startup and shared across requests
 def get_agent(request: Request) -> object:
     return request.app.state.agent
 
 
-# OAuth2 scheme — reads the Bearer token from the Authorization header
+# OAuth2 scheme: reads the Bearer token from the Authorization header
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-
+# this dep, reads jwt of user then looks him up in the db
 async def get_current_user(
     token: Annotated[str, Depends(_oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -59,7 +59,7 @@ async def get_current_user(
     return user
 
 
-# Convenience type aliases for route signatures
+# Convenience type aliases for route signatures so that they don't have to repeat the Depends() everywhere
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DBDep = Annotated[AsyncSession, Depends(get_db)]
 OpenAIDep = Annotated[AsyncOpenAI, Depends(get_openai)]

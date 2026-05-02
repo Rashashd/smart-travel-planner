@@ -26,7 +26,7 @@ async def chat(
     db: DBDep,
     agent: AgentDep,
 ):
-    # ── Get or create session ────────────────────────────────────────────────
+    # Get or create session 
     if req.session_id:
         result = await db.execute(select(ChatSession).where(ChatSession.id == uuid.UUID(req.session_id)))
         session = result.scalar_one_or_none()
@@ -36,17 +36,20 @@ async def chat(
         session = ChatSession(user_id=user.id, title=req.question[:50])
         db.add(session)
         await db.flush()  # flush to get session.id before using it
+        # Flushing tells the database to process the insert and return the generated ID without committing, so if something goes wrong later, the whole thing can still be rolled back cleanly
 
-    # ── Persist user message ─────────────────────────────────────────────────
+    # insert user message into db before invoking agent
     db.add(ChatMessage(session_id=session.id, role="user", content=req.question))
 
-    # ── Invoke agent ─────────────────────────────────────────────────────────
-    config = {"configurable": {"thread_id": str(session.id)}}
+    # Invoke agent and go to function build messages
+    config = {"configurable": {"thread_id": str(session.id)}} # LangGraph requires a string key. Passing a UUID object directly causes a runtime error
     messages_to_send = await build_messages(agent, config, session.id, req.question, db)
 
+    # callbacks from langchain
     timing_cb = ToolTimingCallback()
     cost_cb = CostTracker()
     start = time.perf_counter()
+
 
     result = await agent.ainvoke(
         {"messages": messages_to_send},
@@ -56,10 +59,10 @@ async def chat(
     duration = time.perf_counter() - start
     answer = result["messages"][-1].content
 
-    # ── Persist assistant message ────────────────────────────────────────────
+    # Persist assistant message to db
     db.add(ChatMessage(session_id=session.id, role="assistant", content=answer))
 
-    # ── Persist AgentRun + ToolCalls ─────────────────────────────────────────
+    # Persist AgentRun + ToolCalls
     tool_calls_data = extract_tool_calls(result["messages"])
 
     agent_run = AgentRun(
@@ -86,8 +89,9 @@ async def chat(
 
     await db.commit()
 
-    # ── Slack webhook — fire and forget, never awaited on the critical path ──
+    # Slack webhook: fire and forget, never awaited on the critical path
     s = get_settings()
+    # create task to send to the user's slack without delaying the http response
     asyncio.create_task(deliver_trip_plan(s.slack_webhook_url, TripPlanEvent(user_email=user.email, plan=answer)))
 
     log.info("chat.complete", session_id=str(session.id), duration_s=duration, cost_usd=cost_cb.cost_usd)

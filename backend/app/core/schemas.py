@@ -4,7 +4,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict
 
 # Authentication
-
+# http boundary schems so the router imports it
 class UserCreate(BaseModel):
     # username field in OAuth2 form maps to email
     email: str

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
-load_dotenv()  # must run before any langchain import — LangSmith reads os.environ at import time
+load_dotenv()  # must run before any langchain import, LangSmith reads os.environ at import time. if it runs after, LangSmith never sees your env vars and tracing is silent
 
 import asyncio  # noqa: E402
 
@@ -20,17 +20,20 @@ from app.services.retriever import make_retriever  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
-
+# defining the the app's startup and shutdown logic
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # reading .env into settings
     s = get_settings()
 
     app.state.engine = make_engine(s.database_url)
-
+    # create all tables if they dont exist
     async with app.state.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     app.state.openai = AsyncOpenAI(api_key=s.openai_api_key.get_secret_value())
+    
+    # loading classifier, asyncio because joblib is not async safe it may block i/o
     app.state.classifier = await asyncio.to_thread(joblib.load, s.classifier_path)
 
     retriever = make_retriever(app.state.engine, app.state.openai)
@@ -42,6 +45,7 @@ async def lifespan(app: FastAPI):
     await app.state.engine.dispose()
     logger.info("shutdown complete")
 
+# All these go into app.state: FastAPI's official way to share singletons across requests where deps.py reads them via request.app.state.
 
 app = FastAPI(title="Smart Travel Planner", lifespan=lifespan)
 

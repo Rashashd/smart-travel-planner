@@ -24,6 +24,8 @@ class SearchInput(BaseModel):
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
+
+# duckduckgo search is not async, so we run it in a thread to avoid blocking the event loop. We also add retries with exponential backoff in case of transient failures
 def _ddgs_search(query: str, max_results: int) -> list[dict]:
     with DDGS() as ddgs:
         results = list(ddgs.text(query, max_results=max_results))

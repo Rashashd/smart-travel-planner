@@ -27,17 +27,19 @@ async def build_messages(agent: Any, config: dict, session_id: Any, question: st
     Warm (checkpointer has state): send only the new message.
     Cold (server restarted): replay DB history first, then append the new message.
     """
+    # check if MemorySaver has this id
     checkpoint = await agent.checkpointer.aget(config)
     if checkpoint is not None:
-        return [HumanMessage(content=question)]
+        return [HumanMessage(content=question)] # if we have a checkpoint, send the new question as a single message
 
+    # if server restarted, reload history from db
     hist_result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.created_at)
     )
     history = hist_result.scalars().all()
-
+    # then append the new question
     messages: list = []
     for msg in history:
         if msg.role == "user":
@@ -49,7 +51,7 @@ async def build_messages(agent: Any, config: dict, session_id: Any, question: st
 
 
 def extract_tool_calls(messages: list) -> list[dict]:
-    """Parse LangGraph message list into a flat list of tool call dicts."""
+    # Parse LangGraph message list into a flat list of tool call dicts
     by_id: dict[str, dict] = {}
     ordered: list[dict] = []
 
@@ -106,6 +108,7 @@ def build_agent(settings: Settings, classifier: object, retriever: Callable) -> 
 
     memory = MemorySaver()
 
+    # create_react_agent in a langgraph built in function that creates a loop where the llm reasons,  picks a tool, gets the result until it has an answer
     return create_react_agent(
         model=strong_llm,
         tools=tools,

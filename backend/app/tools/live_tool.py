@@ -12,6 +12,7 @@ from app.core.config import get_settings
 log = structlog.get_logger(__name__)
 
 # ToolError is defined here and imported by rag_tool and classifier_tool
+# never raise exceptions out of a tool, LangGraph doesn't know what to do with them. Return a structured error so the LLM can read it and decide to retry, skip, or explain the problem to the user.
 class ToolError(BaseModel):
     error: str
     retryable: bool
@@ -101,6 +102,7 @@ def _mock_flights(city: str) -> dict:
 async def _live_conditions(city: str, country: str) -> dict | ToolError:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # get the data inparallel since they're independent calls
             weather, fx = await asyncio.gather(
                 _fetch_weather(client, city),
                 _fetch_fx(client, "USD"),

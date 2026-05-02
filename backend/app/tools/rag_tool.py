@@ -22,9 +22,11 @@ class RAGInput(BaseModel):
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
+
+# rewrite query improves vector match quality significantly
 async def _rewrite_query(raw: str, cheap_llm: ChatOpenAI) -> str:
     result = await cheap_llm.ainvoke(RAG_QUERY_REWRITE_PROMPT.format(query=raw))
-    return result.content.strip()
+    return str(result.content).strip()
 
 
 def make_rag_tool(cheap_llm: ChatOpenAI, retriever: Callable) -> StructuredTool:

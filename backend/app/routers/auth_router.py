@@ -16,6 +16,7 @@ router = APIRouter()
 async def register(body: UserCreate, db: DBDep):
     # Reject duplicate emails
     existing = await db.execute(select(User).where(User.email == body.email))
+    # checking for duplicate
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 

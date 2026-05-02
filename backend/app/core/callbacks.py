@@ -10,14 +10,20 @@ _PRICING: dict[str, dict[str, float]] = {
     "gpt-4o": {"input": 2.50, "output": 10.00},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
 }
+# observability instrumentation for agent runs
+
+# we use these callbacks to let langgraph call them at the right time during execution, so we don't manually instrument every single LLM and tool call in the agent code
 
 
+# basecallbackhandler is a class from langchain
+# essentially an interface that guarantees langgraph knows how to talk to the callback objects
 class _TokenLogger(BaseCallbackHandler):
-    """Logs prompt + completion token counts after every LLM call."""
+    # Logs prompt + completion token counts after every LLM call, it is used by cost tracker
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         for generation in response.generations:
             for g in generation:
+                # tries to get token usage
                 usage = getattr(g.message, "usage_metadata", None) or getattr(g, "generation_info", {})
                 if not usage:
                     continue
@@ -34,8 +40,9 @@ class _TokenLogger(BaseCallbackHandler):
 
 
 class CostTracker(BaseCallbackHandler):
-    """Accumulates token counts across all LLM calls in one agent run and computes cost."""
+    # Accumulates token counts across all LLM calls in one agent run and computes cost
 
+    # defining attributes for the class
     def __init__(self):
         self._cost_usd: float = 0.0
         self.prompt_tokens: int = 0
@@ -65,7 +72,7 @@ class CostTracker(BaseCallbackHandler):
 
 
 class ToolTimingCallback(BaseCallbackHandler):
-    """Records how long each tool call takes and whether it errored."""
+    # Records how long each tool call takes and whether it errored
 
     def __init__(self):
         self._starts: dict[str, float] = {}
